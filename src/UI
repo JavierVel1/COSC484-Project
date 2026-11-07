@@ -172,15 +172,103 @@ var S={tab:'home',liked:new Set([1]),saved:new Set(),meal:'All',diets:new Set(),
 var MEALS=['All','Breakfast','Lunch','Dinner','Dessert'],DIETS=['Vegan','Vegetarian','Halal'],ALLERGY=['Gluten-free','Dairy-free','Nut-free','Egg-free'],TIMES={'Under 15 min':15,'Under 30 min':30,'Under 1 hour':60},DIFFS=['Beginner','Intermediate','Advanced'],MEATS=['Chicken','Beef','Pork','Lamb','Turkey','Fish','Shrimp'];
 var PEOPLE=['marisol.cooks','tofutuesday','sunday.batch','dad.dinners','bowlsbyjo'],MSG={'marisol.cooks':[{me:false,t:'You have to try this one'},{me:false,rid:3}]};
 function find(id){return R.filter(function(r){return r.id===id})[0]}
-function ph(r,c){return '<div class="ph '+(c||'')+'" data-act="open" data-id="'+r.id+'" style="background:linear-gradient(135deg,'+r.g[0]+','+r.g[1]+')" role="img" aria-label="'+e(r.title)+'">'+r.emoji+'</div>'}
-function chips(r){return '<div class="chips"><span class="chip">'+I('clock')+r.time+' min</span><span class="chip">Serves '+r.serves+'</span>'+(r.diff?'<span class="chip">'+e(r.diff)+'</span>':'')+'</div>'}
+
+// TheMealDB API integration
+const MEALDB_URL =
+    "https://www.themealdb.com/api/json/v1/1";
+
+async function searchMealDB(query) {
+    const url = `${MEALDB_URL}/search.php?s=${encodeURIComponent(query)}`;
+
+    const response = await fetch(url);
+
+    if (!response.ok) {
+        throw new Error("Unable to contact TheMealDB.");
+    }
+
+    const data = await response.json();
+
+    return data.meals || [];
+}
+
+function formatMealDBRecipe(meal) {
+    const ingredients = [];
+
+    for (let i = 1; i <= 20; i++) {
+        const name = meal[`strIngredient${i}`];
+        const measure = meal[`strMeasure${i}`];
+
+        if (name && name.trim()) {
+            ingredients.push([
+                0,
+                measure ? measure.trim() : "",
+                name.trim()
+            ]);
+        }
+    }
+
+    const steps = (meal.strInstructions || "")
+        .split(/\r?\n/)
+        .map(step => step.trim())
+        .filter(Boolean);
+
+    return {
+        id: "meal-" + meal.idMeal,
+        title: meal.strMeal,
+        user: "TheMealDB",
+        emoji: "🍽️",
+        image: meal.strMealThumb,
+        g: ["#F3D9A4", "#C98A4B"],
+        time: null,
+        serves: 2,
+        diet: meal.strCategory || "",
+        meal: [],
+        tags: [],
+        diff: "",
+        meats: [],
+        comments: [],
+        likes: 0,
+        cap: meal.strArea
+            ? meal.strArea + " cuisine"
+            : "Recipe from TheMealDB.",
+        ing: ingredients,
+        steps: steps.length ? steps : [meal.strInstructions],
+        source: meal.strSource,
+        youtube: meal.strYoutube
+    };
+}
+
+//allows for a recipe to be displayed with either an image or a gradient background with an emoji
+function ph(r,c) {
+    if (r.image) {
+        return '<div class="ph '+(c||'')+'" data-act="open" data-id="'+r.id+'">' +
+            '<img src="'+e(r.image)+'" alt="'+e(r.title)+'" ' +
+            'style="width:100%;height:100%;object-fit:cover">' +
+            '</div>';
+    }
+
+    return '<div class="ph '+(c||'')+'" data-act="open" data-id="'+r.id+'" style="background:linear-gradient(135deg,'+r.g[0]+','+r.g[1]+')" role="img" aria-label="'+e(r.title)+'">'+r.emoji+'</div>';
+}
+
+//displays the chips for time, serves, and difficulty
+function chips(r) {
+    return '<div class="chips">' +
+        (r.time ? '<span class="chip">'+I('clock')+r.time+' min</span>' : '') +
+        '<span class="chip">Serves '+r.serves+'</span>' +
+        (r.diff ? '<span class="chip">'+e(r.diff)+'</span>' : '') +
+        '</div>';
+}
+
+
 function card(r){var l=S.liked.has(r.id),s=S.saved.has(r.id);return '<article class="card"><div class="chead"><span class="av">'+e(r.user[0].toUpperCase())+'</span>'+e(r.user)+'</div>'+ph(r)+'<div class="acts"><button data-act="like" data-id="'+r.id+'" class="'+(l?'on-like':'')+'" aria-label="Like" aria-pressed="'+l+'">'+I('heart',l)+'<span>'+(r.likes+(l?1:0)).toLocaleString()+'</span></button><button data-act="cmt" data-id="'+r.id+'" aria-label="Comments">'+I('chat')+'<span>'+r.comments.length+'</span></button><button data-act="share" data-id="'+r.id+'" aria-label="Send to a friend">'+I('send')+'</button><button class="save '+(s?'on':'')+'" data-act="save" data-id="'+r.id+'" aria-pressed="'+s+'">'+I('save',s)+(s?'Saved':'Save')+'</button></div>'+chips(r)+tagRow(r)+'<div class="cap"><b>'+e(r.title)+'</b><small>'+e(r.cap)+'</small></div>'+secs(r)+'</article>'}
 function match(r){var q=S.q.toLowerCase();return (S.time==='Any'||r.time<=TIMES[S.time])&&(S.diff==='Any'||r.diff===S.diff)&&(!S.meats.size||r.meats.some(function(m){return S.meats.has(m)}))&&(S.meal==='All'||r.meal.indexOf(S.meal)>-1)&&Array.from(S.diets).every(function(d){return r.tags.indexOf(d)>-1})&&(!q||r.title.toLowerCase().indexOf(q)>-1)}
 function frow(l,items,act,isOn){return '<div class="fl">'+l+'</div><div class="filters">'+items.map(function(f){var on=isOn(f);return '<button class="f '+(on?'on':'')+'" data-act="'+act+'" data-id="'+f+'" aria-pressed="'+on+'">'+f+'</button>'}).join('')+'</div>'}
 function fbar(){var n=(S.meal!=='All'?1:0)+S.diets.size+(S.time!=='Any'?1:0)+(S.diff!=='Any'?1:0)+S.meats.size,o=S.fopen;return '<div class="fwrap"><button class="fbtn" data-act="fopen" aria-expanded="'+o+'"><span>Filters'+(n?'<span class="cnt">'+n+'</span>':'')+'</span><span class="chev'+(o?' up':'')+'">'+I('down')+'</span></button>'+(o?'<div class="fpanel">'+frow('Meal',MEALS,'meal',function(f){return S.meal===f})+frow('Time to make',['Any'].concat(Object.keys(TIMES)),'time',function(f){return S.time===f})+frow('Difficulty',['Any'].concat(DIFFS),'diff',function(f){return S.diff===f})+frow('Meat',MEATS,'meat',function(f){return S.meats.has(f)})+frow('Diet',DIETS,'diet',function(f){return S.diets.has(f)})+frow('Allergy-free',ALLERGY,'diet',function(f){return S.diets.has(f)})+(n?'<button class="ghost" data-act="clr">Clear filters</button>':'')+'</div>':'')+'</div>'}
 function tagRow(r){var t=r.meal.map(function(m){return '<span class="tag m">'+e(m)+'</span>'}).concat(r.meats.concat(r.tags).map(function(g){return '<span class="tag">'+e(g)+'</span>'}));return t.length?'<div class="chips tags">'+t.join('')+'</div>':''}
 function det(k,t,b){return '<details class="sec" data-k="'+k+'"'+(S.dopen.has(k)?' open':'')+'><summary>'+t+'</summary>'+b+'</details>'}
-function secs(r){return det('i'+r.id,'Ingredients (serves '+r.serves+')','<ul class="il">'+r.ing.map(function(g){return '<li>'+(g[0]?fq(g[0])+' '+e(g[1])+' ':'')+e(g[2])+'</li>'}).join('')+'</ul>')+det('s'+r.id,'Instructions','<ol class="steps">'+r.steps.map(function(s){return '<li>'+e(s)+'</li>'}).join('')+'</ol>')+det('c'+r.id,'Comments ('+r.comments.length+')','<div class="cm">'+r.comments.map(function(c){return '<p><b>'+e(c.u)+'</b>'+e(c.t)+'</p>'}).join('')+'<div class="cin"><input class="inp" id="ci'+r.id+'" data-cin="'+r.id+'" placeholder="Add a comment" aria-label="Add a comment"><button class="btn" data-act="cpost" data-id="'+r.id+'">Post</button></div></div>')}
+//displays the ingredients, instructions, and comments for a recipe
+function secs(r){return det('i'+r.id,'Ingredients (serves '+r.serves+')','<ul class="il">'+r.ing.map(function(g){return '<li>'+(g[0] ? fq(g[0])+' ' : '')+
+(g[1] ? e(g[1])+' ' : '')+e(g[2])+'</li>'}).join('')+'</ul>')+det('s'+r.id,'Instructions','<ol class="steps">'+r.steps.map(function(s){return '<li>'+e(s)+'</li>'}).join('')+'</ol>')+det('c'+r.id,'Comments ('+r.comments.length+')','<div class="cm">'+r.comments.map(function(c){return '<p><b>'+e(c.u)+'</b>'+e(c.t)+'</p>'}).join('')+'<div class="cin"><input class="inp" id="ci'+r.id+'" data-cin="'+r.id+'" placeholder="Add a comment" aria-label="Add a comment"><button class="btn" data-act="cpost" data-id="'+r.id+'">Post</button></div></div>')}
 function cchip(k,v){var on=k==='d'?S.cd===v:(k==='m'?S.cm:k==='x'?S.cx:S.ct).has(v);return '<button type="button" class="f '+(on?'on':'')+'" data-act="ctog" data-k="'+k+'" data-id="'+v+'" aria-pressed="'+on+'">'+v+'</button>'}
 function reel(r){var l=S.liked.has(r.id),s=S.saved.has(r.id);return '<section class="reel" style="background:linear-gradient(160deg,'+r.g[0]+','+r.g[1]+')"><div class="rem" aria-hidden="true">'+r.emoji+'</div><div class="scrim"></div><div class="rrail"><button data-act="like" data-id="'+r.id+'" class="'+(l?'on-like':'')+'" aria-pressed="'+l+'" aria-label="Like">'+I('heart',l)+'<span>'+(r.likes+(l?1:0)).toLocaleString()+'</span></button><button data-act="open" data-id="'+r.id+'" aria-label="Open recipe">'+I('chat')+'<span>Recipe</span></button><button data-act="save" data-id="'+r.id+'" class="'+(s?'on-like':'')+'" aria-pressed="'+s+'" aria-label="Save to cookbook">'+I('save',s)+'<span>'+(s?'Saved':'Save')+'</span></button></div><div class="rinfo"><div class="chead" style="padding:0 0 8px;color:#fff"><span class="av">'+e(r.user[0].toUpperCase())+'</span>'+e(r.user)+'</div><b>'+e(r.title)+'</b><p>'+e(r.cap)+'</p><button class="rbtn" data-act="open" data-id="'+r.id+'">View recipe</button></div></section>'}
 function ptabs(){return '<div class="ptabs" role="tablist">'+[['posts','Posts'],['book','Cookbook']].map(function(t){var on=S.ptab===t[0];return '<button role="tab" aria-selected="'+on+'" class="'+(on?'on':'')+'" data-act="ptab" data-id="'+t[0]+'">'+t[1]+'</button>'}).join('')+'</div>'}
@@ -192,12 +280,25 @@ function feed(){var l=R.filter(match);return l.length?l.map(card).join(''):'<div
 function grid(list,msg){return list.length?'<div class="grid">'+list.map(function(r){return ph(r,'sq')}).join('')+'</div>':'<div class="empty"><h3>'+msg[0]+'</h3><p>'+msg[1]+'</p></div>'}
 var V={
 home:function(){return '<div class="stories">'+R.map(function(r){return '<button class="story" data-act="open" data-id="'+r.id+'"><div class="ring"><span>'+r.emoji+'</span></div>'+e(r.user.split('.')[0])+'</button>'}).join('')+'</div>'+fbar()+'<div id="grid">'+feed()+'</div>'},
-explore:function(){return '<input class="search" id="q" type="search" placeholder="Search recipes" aria-label="Search recipes" value="'+e(S.q)+'">'+fbar()+'<div id="grid">'+exGrid()+'</div>'},
+
+//displays the search bar, filters, and grid of recipes for the explore tab
+explore: function() {
+    return '<form id="meal-search-form" style="display:flex;gap:8px;padding:12px 16px">' +
+        '<input class="search" style="margin:0;flex:1;width:auto" id="q" type="search" placeholder="Search recipes..." aria-label="Search recipes" value="'+e(S.q)+'">' +
+        '<button class="btn" type="submit">Search</button>' +
+        '</form>' +
+        fbar() +
+        '<div id="grid">'+exGrid()+'</div>' +
+        '<div id="meal-status" style="padding:12px 16px"></div>';
+},
+
 create:function(){return '<div class="body"><h2 style="font-size:26px">New recipe</h2><label for="t">Title</label><input class="inp" id="t" placeholder="Name your dish"><label for="m">Time in minutes</label><input class="inp" id="m" type="number" inputmode="numeric" placeholder="30"><label>Meal (pick all that apply)</label><div class="cf">'+MEALS.slice(1).map(function(m){return cchip('m',m)}).join('')+'</div><label>Diet</label><div class="cf">'+DIETS.map(function(d){return cchip('t',d)}).join('')+'</div><label>Allergy-free</label><div class="cf">'+ALLERGY.map(function(d){return cchip('t',d)}).join('')+'</div><label>Meat (if any)</label><div class="cf">'+MEATS.map(function(d){return cchip('x',d)}).join('')+'</div><label>Difficulty</label><div class="cf">'+DIFFS.map(function(d){return cchip('d',d)}).join('')+'</div><label for="g">Ingredients (one per line)</label><textarea class="inp" id="g" rows="4"></textarea><label for="s">Instructions (one step per line)</label><textarea class="inp" id="s" rows="4"></textarea><button class="btn full" style="margin-top:20px" data-act="post">Post recipe</button></div>'},
 reels:function(){return '<div class="rwrap"><h2 class="rtitle">What’s cooking?</h2><div class="reels">'+R.map(reel).join('')+'</div></div>'},
 profile:function(){var mine=R.filter(function(r){return r.user==='you'});return '<div class="stats"><span class="av" style="width:72px;height:72px;font-size:28px">Y</span><div><b>'+mine.length+'</b>Recipes</div><div><b>128</b>Followers</div><div><b>96</b>Following</div></div><div class="body" style="padding-top:0"><b>you</b><p style="color:var(--mute)">Cooking something new every week.</p></div>'+ptabs()+(S.ptab==='posts'?grid(mine,['Share your first recipe','Post a dish and it shows up on your profile.']):grid(R.filter(function(r){return S.saved.has(r.id)}),['Your cookbook is empty','Tap Save on any recipe and it lands here.']))}};
 function exGrid(){var l=R.filter(match);return l.length?'<ul class="rl">'+l.map(function(r){return '<li><button class="row" data-act="open" data-id="'+r.id+'"><b>'+e(r.title)+'</b><small>by '+e(r.user)+', '+r.time+' min</small></button></li>'}).join('')+'</ul>':'<div class="empty"><h3>No matches</h3><p>Try a different search or filter.</p></div>'}
-function detail(){var r=find(S.open),k=S.sv/r.serves;return '<div class="sheet"><button class="back" data-act="back" aria-label="Back">'+I('back')+'</button>'+ph(r)+'<div class="body"><h1>'+e(r.title)+'</h1><p style="color:var(--mute)">by '+e(r.user)+'</p>'+chips(r).replace('class="chips"','class="chips" style="padding-left:0"')+tagRow(r).replace('class="chips tags"','class="chips tags" style="padding-left:0"')+'<div class="stepper"><button data-act="sv" data-id="-1" aria-label="Fewer servings">−</button><b>'+S.sv+' servings</b><button data-act="sv" data-id="1" aria-label="More servings">+</button></div><h2>Ingredients</h2>'+r.ing.map(function(g,i){var on=S.chk.has(i);return '<button class="ing '+(on?'on':'')+'" data-act="chk" data-id="'+i+'" aria-pressed="'+on+'"><span class="bx">'+(on?'✓':'')+'</span><span class="q">'+(g[0]?fq(g[0]*k)+' '+g[1]:'')+'</span>'+e(g[2])+'</button>'}).join('')+'<h2 style="margin-top:22px">Steps</h2><ol class="steps">'+r.steps.map(function(s){return '<li>'+e(s)+'</li>'}).join('')+'</ol></div><div class="cta"><button class="btn full" data-act="cook">Start cooking</button></div></div>'}
+//displays the recipe details, including ingredients and steps, with a stepper to adjust servings
+function detail(){var r=find(S.open),k=S.sv/r.serves;return '<div class="sheet"><button class="back" data-act="back" aria-label="Back">'+I('back')+'</button>'+ph(r)+'<div class="body"><h1>'+e(r.title)+'</h1><p style="color:var(--mute)">by '+e(r.user)+'</p>'+chips(r).replace('class="chips"','class="chips" style="padding-left:0"')+tagRow(r).replace('class="chips tags"','class="chips tags" style="padding-left:0"')+'<div class="stepper"><button data-act="sv" data-id="-1" aria-label="Fewer servings">−</button><b>'+S.sv+' servings</b><button data-act="sv" data-id="1" aria-label="More servings">+</button></div><h2>Ingredients</h2>'+r.ing.map(function(g,i){var on=S.chk.has(i);return '<button class="ing '+(on?'on':'')+'" data-act="chk" data-id="'+i+'" aria-pressed="'+on+'"><span class="bx">'+(on?'✓':'')+'</span><span class="q">'+(g[0] ? fq(g[0]*k)+' ' : '')+
+(g[1] ? e(g[1]) : '')+'</span>'+e(g[2])+'</button>'}).join('')+'<h2 style="margin-top:22px">Steps</h2><ol class="steps">'+r.steps.map(function(s){return '<li>'+e(s)+'</li>'}).join('')+'</ol></div><div class="cta"><button class="btn full" data-act="cook">Start cooking</button></div></div>'}
 function cook(){var r=find(S.open),n=r.steps.length,c=S.cook,done=c>=n;return '<div class="sheet cook" style="padding-bottom:0"><div class="bar"><i style="width:'+Math.min(100,(c+1)/n*100)+'%"></i></div><div class="txt">'+(done?'<h2>Dinner is ready.</h2><p>Share how it turned out when you’ve tasted it.</p>':'<p style="color:var(--mute);font-weight:700">Step '+(c+1)+' of '+n+'</p><h2>'+e(r.steps[c])+'</h2>')+'</div><div class="nv"><button class="ghost" data-act="prev">'+(c?'Back':'Exit')+'</button><button class="btn" data-act="next">'+(done?'Finish':'Next step')+'</button></div></div>'}
 function nav(){var T=[['home','home','Home'],['explore','search','Explore'],['create','plus','Create'],['reels','play','What’s cooking?'],['profile','user','Profile']];return T.map(function(t){return '<button data-act="tab" data-id="'+t[0]+'" aria-label="'+t[2]+'" class="'+(S.tab===t[0]?'on ':'')+(t[0]==='create'?'mk':'')+'">'+I(t[1],S.tab===t[0]&&t[0]!=='create'&&t[0]!=='explore')+'</button>'}).join('')}
 function render(){var rc=document.querySelector('.reels'),rs=rc?rc.scrollTop:0;document.body.classList.toggle('reelmode',S.tab==='reels');document.getElementById('view').innerHTML=V[S.tab]();rc=document.querySelector('.reels');if(rc)rc.scrollTop=rs;document.getElementById('nav').innerHTML=nav();document.getElementById('hdr').innerHTML=S.tab==='home'?'<button class="hb" data-act="inbox" aria-label="Messages">'+I('send')+(S.unread.size?'<i class="dot"></i>':'')+'</button>':'';document.getElementById('sheet').innerHTML=S.cook!==null?cook():S.open?detail():S.dm?(S.dm==='inbox'?inbox():chat(S.dm)):S.share?shareSheet():'';var ms=document.querySelector('.msgs');if(ms){ms.parentNode.scrollTop=ms.parentNode.scrollHeight}document.body.style.overflow=(S.open||S.dm||S.share)?'hidden':''}
@@ -239,6 +340,48 @@ render()});
 document.addEventListener('toggle',function(ev){var k=ev.target.dataset&&ev.target.dataset.k;if(k){ev.target.open?S.dopen.add(k):S.dopen.delete(k)}},true);
 document.addEventListener('keydown',function(ev){if(ev.key!=='Enter')return;var t=ev.target;if(t.dataset&&t.dataset.cin){t.parentNode.querySelector('[data-act=cpost]').click()}else if(t.id==='mi'){document.querySelector('[data-act=msend]').click()}});
 document.addEventListener('input',function(ev){if(ev.target.id==='q'){S.q=ev.target.value;document.getElementById('grid').innerHTML=exGrid()}});
+
+// Handle form submission for searching TheMealDB
+document.addEventListener('submit', async function(ev) {
+    if (ev.target.id !== 'meal-search-form') return;
+
+    ev.preventDefault();
+
+    const query = document.getElementById('q').value.trim();
+
+    if (!query) return;
+
+    const status = document.getElementById('meal-status');
+
+    status.textContent = "Searching TheMealDB...";
+
+    try {
+        const results = await searchMealDB(query);
+
+        const formatted = results.map(formatMealDBRecipe);
+
+        // Add API recipes to the existing recipe collection
+        formatted.forEach(function(recipe) {
+            R = R.filter(function(existing) {
+                return existing.id !== recipe.id;
+            });
+
+            R.push(recipe);
+        });
+
+        status.textContent = results.length
+            ? "Found " + results.length + " recipes from TheMealDB."
+            : "No recipes found. Try another search.";
+
+        document.getElementById('grid').innerHTML = exGrid();
+
+    } catch (error) {
+        status.textContent = "Unable to retrieve recipes. Please try again.";
+        console.error(error);
+    }
+});
+
+
 render();
 </script>
 </body>
